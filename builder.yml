@@ -1,0 +1,11 @@
+services:
+  prj5-bootstrap:
+    build:
+      context: .
+      target: prj5-bootstrap
+    image: prj5-bootstrap
+  prj5-peer:
+    build:
+      context: .
+      target: prj5-peer
+    image: prj5-peer
