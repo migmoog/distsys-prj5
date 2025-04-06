@@ -1,7 +1,11 @@
 use indexmap::IndexSet;
-use tokio::{net::TcpListener, sync::mpsc::UnboundedReceiver};
+use tokio::{
+    io,
+    net::{TcpListener, UdpSocket},
+    sync::mpsc::UnboundedReceiver,
+};
 
-use crate::setup::socketry::{attempt_op, bootstrap_comms};
+use crate::setup::socketry::{attempt_op, bootstrap_comms, host, NodeCaster};
 
 use super::messaging::Message;
 
@@ -9,20 +13,20 @@ pub type NodeId = u64;
 pub struct Ring {
     nodes: IndexSet<NodeId>,
     recv: UnboundedReceiver<Message>,
+    pusher: NodeCaster,
 }
 
 impl Ring {
     pub async fn new() -> tokio::io::Result<Self> {
-        let listener = attempt_op(
-            TcpListener::bind,
-            &hostname::get().unwrap().into_string().unwrap(),
-        )
-        .await;
+        let hn = host();
+        let listener = attempt_op(TcpListener::bind, &hn, 6969).await;
         let recv = bootstrap_comms(listener);
+        let pusher = NodeCaster::new().await;
 
         Ok(Self {
             nodes: IndexSet::new(),
             recv,
+            pusher,
         })
     }
 
@@ -30,8 +34,31 @@ impl Ring {
         self.recv.try_recv().ok()
     }
 
-    pub fn respond_to_join(&mut self, nid: NodeId) {
+    pub async fn respond_to_join(&mut self, nid: NodeId) -> io::Result<()> {
         self.nodes.insert(nid);
-        println!("Added {nid}");
+        self.nodes.sort(); // Ring ordering
+
+        let len = self.nodes.len();
+        if len <= 1 {
+            return Ok(()); // Avoids unneccesary prints 🤷‍♀️
+        }
+        let idx = self.nodes.get_index_of(&nid).unwrap();
+
+        let pred = self
+            .nodes
+            .get_index(if idx == 0 { len - 1 } else { idx - 1 })
+            .unwrap();
+        let succ = self.nodes.get_index((idx + 1) % len).unwrap();
+
+        for (target, msg) in [
+            (*pred, Message::NewSuccessor(nid)),
+            (nid, Message::NewPredecessor(*pred)),
+            (*succ, Message::NewPredecessor(nid)),
+            (nid, Message::NewSuccessor(*succ)),
+        ] {
+            self.pusher.tell_node(msg, target).await?;
+        }
+
+        Ok(())
     }
 }

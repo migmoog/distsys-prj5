@@ -19,7 +19,8 @@ async fn main() -> tokio::io::Result<()> {
         loop {
             if let Some(msg) = ring.poll() {
                 match msg {
-                    Message::Join(nid) => ring.respond_to_join(nid),
+                    Message::Join(nid) => ring.respond_to_join(nid).await?,
+                    _ => {}
                 }
             }
         }
@@ -33,11 +34,11 @@ async fn main() -> tokio::io::Result<()> {
         if let Some(dur) = arguments.delay {
             sleep(Duration::from_secs(dur));
             peer.join().await?;
-            println!("Joined");
         }
 
         loop {
             // TODO
+            peer.hear().await?;
         }
     }
 }

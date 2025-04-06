@@ -1,23 +1,23 @@
 use std::{future::Future, thread::sleep, time::Duration};
 
 use tokio::{
-    io::AsyncReadExt,
-    net::{TcpListener, TcpStream},
+    io::{self, AsyncReadExt},
+    net::{TcpListener, TcpStream, UdpSocket},
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
 };
 
-use crate::state::messaging::Message;
+use crate::state::{bootstrap::NodeId, messaging::Message};
 
 pub fn host() -> String {
     hostname::get().unwrap().into_string().unwrap()
 }
 
-pub async fn attempt_op<F, Fut, Socket>(op: F, host: &str) -> Socket
+pub async fn attempt_op<F, Fut, Socket>(op: F, host: &str, port: u64) -> Socket
 where
     F: Fn(String) -> Fut,
     Fut: Future<Output = std::io::Result<Socket>>,
 {
-    let addr = format!("{}:{}", host, "6969");
+    let addr = format!("{}:{}", host, port);
     loop {
         match op(addr.clone()).await {
             Ok(s) => break s,
@@ -48,4 +48,32 @@ pub fn bootstrap_comms(listener: TcpListener) -> UnboundedReceiver<Message> {
     });
 
     recv
+}
+
+pub struct NodeCaster(UdpSocket);
+impl NodeCaster {
+    const NODE_PORT: u64 = 6970;
+    /// Returns an address of a hostname over the specified nodecaster port
+    pub fn nc_addr(host: &str) -> String {
+        format!("{}:{}", host, Self::NODE_PORT)
+    }
+
+    pub async fn new() -> Self {
+        Self(attempt_op(UdpSocket::bind, &host(), Self::NODE_PORT).await)
+    }
+
+    /// Sends a message to the specified node ID
+    pub async fn tell_node(&mut self, msg: Message, nid: NodeId) -> io::Result<()> {
+        let encoded = bincode::serialize(&msg).expect("Is gud");
+        let addr = format!("n{nid}:{}", Self::NODE_PORT);
+        self.0.send_to(&encoded, addr).await?;
+        Ok(())
+    }
+
+    /// Awaits to hear any message
+    pub async fn hear(&mut self) -> io::Result<Message> {
+        let mut buf = [0; 1024];
+        let (bytes_read, _) = self.0.recv_from(&mut buf).await?;
+        Ok(bincode::deserialize(&buf[..bytes_read]).expect("Should be deserializable"))
+    }
 }
