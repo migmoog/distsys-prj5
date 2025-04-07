@@ -35,28 +35,28 @@ async fn check_node(mut stream: TcpStream, send: UnboundedSender<Message>) {
     }
 }
 
-pub fn bootstrap_comms(listener: TcpListener) -> UnboundedReceiver<Message> {
+pub fn bootstrap_comms(
+    listener: TcpListener,
+) -> (UnboundedSender<Message>, UnboundedReceiver<Message>) {
     let (send, recv) = unbounded_channel::<Message>();
+    let sc = send.clone();
     tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = listener.accept().await {
-                let send_clone = send.clone();
+                let send_clone = sc.clone();
                 tokio::spawn(async move { check_node(stream, send_clone).await });
                 //println!("Set up a connection");
             }
         }
     });
 
-    recv
+    (send, recv)
 }
 
+/// UdpSocket wrapper designed for communicating with the ring's members
 pub struct NodeCaster(UdpSocket);
 impl NodeCaster {
     const NODE_PORT: u64 = 6970;
-    /// Returns an address of a hostname over the specified nodecaster port
-    pub fn nc_addr(host: &str) -> String {
-        format!("{}:{}", host, Self::NODE_PORT)
-    }
 
     pub async fn new() -> Self {
         Self(attempt_op(UdpSocket::bind, &host(), Self::NODE_PORT).await)

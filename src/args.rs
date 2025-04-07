@@ -14,7 +14,7 @@ pub struct Project5 {
 
     /// This argument only applies to client for testcases 3, 4, and 5.
     #[arg(short = 't')]
-    pub testcase: bool,
+    pub testcase: Option<u64>,
 
     /// Path to a file containing the object store of the peer.
     #[arg(short = 'o')]
